@@ -1,66 +1,97 @@
-from typing import List
-import requests
-import sys
-import io
+from typing import List, Union
+import json
 import os
-import time
+import requests
 import ctypes
+import time
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
-def fetch_image_urls(subreddit_url: str) -> List[str]:
-    """Fetch image URLs from a subreddit JSON feed."""
-    response = requests.get(subreddit_url, headers={"User-agent": "your bot 0.1"})
-    if response.status_code != 200:
-        print(f"Failed to retrieve data: {response.status_code}")
-        return []
+def find_image_urls(data: Union[dict, list]) -> List[str]:
+    """
+    Recursively find and return a list of unique image URLs from the given data.
 
-    data = response.json()
-    return [
-        post["data"].get("url")
-        for post in data["data"]["children"]
-        if post["data"].get("url", "").endswith((".jpg", ".png"))
-    ]
+    The function searches for URLs in dictionaries with keys "url" or
+    "url_overridden_by_dest" that contain "i.redd.it". It processes both
+    dictionaries and lists, handling nested structures.
 
-def download_images(image_urls: List[str], download_dir: str) -> None:
-    """Download images from the list of URLs and save them to the specified directory."""
-    os.makedirs(download_dir, exist_ok=True)
-    for image_url in image_urls:
-        try:
-            image_response = requests.get(image_url)
-            if image_response.status_code == 200:
-                image_name = os.path.basename(image_url)
-                image_path = os.path.join(download_dir, image_name)
-                with open(image_path, "wb") as image_file:
-                    image_file.write(image_response.content)
-                print(f"Downloaded: {image_url}")
-            else:
-                print(f"Failed to download image: {image_url}")
-        except requests.RequestException as e:
-            print(f"Error downloading {image_url}: {e}")
+    Args:
+        data (Union[dict, list]): The data structure to search for image URLs.
+
+    Returns:
+        List[str]: A list of unique image URLs found in the data.
+    """
+    image_urls = set()
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key in {"url", "url_overridden_by_dest"} and "i.redd.it" in value:
+                image_urls.add(value)
+            elif isinstance(value, (dict, list)):
+                image_urls.update(find_image_urls(value))
+    elif isinstance(data, list):
+        for item in data:
+            image_urls.update(find_image_urls(item))
+
+    return list(image_urls)
+
+
+def download_image(url: str, download_folder: str) -> Union[str, None]:
+    """
+    Download an image from a given URL and save it to the specified folder.
+
+    Args:
+        url (str): The URL of the image to download.
+        download_folder (str): The folder where the image will be saved.
+
+    Returns:
+        Union[str, None]: The file path of the downloaded image if successful,
+        otherwise None.
+    """
+    response = requests.get(url)
+    if response.status_code == 200:
+        file_path = os.path.join(download_folder, os.path.basename(url))
+        with open(file_path, "wb") as file:
+            file.write(response.content)
+        return file_path
+    return None
+
 
 def set_wallpaper(image_path: str) -> None:
-    """Set the desktop wallpaper to the specified image path."""
+    """
+    Set the desktop wallpaper to the specified image.
+
+    Args:
+        image_path (str): The file path to the image to be set as wallpaper.
+
+    Returns:
+        None
+    """
     ctypes.windll.user32.SystemParametersInfoW(20, 0, image_path, 3)
 
-def cycle_wallpapers(download_dir: str, interval: int = 3600) -> None:
-    """Cycle through downloaded images and set them as wallpaper at specified intervals."""
-    image_files = [
-        f for f in os.listdir(download_dir) if f.endswith((".jpg", ".png"))
-    ]
-    while True:
-        for image_file in image_files:
-            image_path = os.path.join(download_dir, image_file)
-            set_wallpaper(image_path)
-            print(f"Wallpaper set to: {image_file}")
-            time.sleep(interval)
 
-def main():
-    subreddit_url = "https://www.reddit.com/r/EarthPorn/.json"
-    download_dir = "downloaded_images"
-    image_urls = fetch_image_urls(subreddit_url)
-    download_images(image_urls, download_dir)
-    cycle_wallpapers(download_dir)
+def main() -> None:
+    """
+    Main function to load image data from a JSON file, download images,
+    and set them as wallpapers in a loop.
+
+    This function reads image data from 'reddit.json', extracts image URLs,
+    downloads the images to a specified folder, and sets them as wallpapers
+    in a continuous loop with a delay.
+    """
+    with open("reddit.json", "r") as file:
+        data = json.load(file)
+
+    urls = find_image_urls(data)
+    download_folder = "downloaded_images"
+    os.makedirs(download_folder, exist_ok=True)
+
+    while True:
+        for url in urls:
+            image_path = download_image(url, download_folder)
+            if image_path:
+                set_wallpaper(image_path)
+                time.sleep(1)
+
 
 if __name__ == "__main__":
     main()
