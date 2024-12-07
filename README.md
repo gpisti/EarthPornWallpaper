@@ -26,7 +26,7 @@ This Python script fetches image URLs from a specified subreddit, downloads the 
 1. Open the script and modify the `subreddit_url` variable in the `main()` function to point to your desired subreddit JSON feed.
 2. Run the script:
 ```bash
-python script_name.py
+python main.py
 ```
 3. The script will download images to the `downloaded_images` directory and cycle them as wallpapers.
 
